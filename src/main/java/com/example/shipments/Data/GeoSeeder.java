@@ -24,7 +24,7 @@ import java.nio.charset.StandardCharsets;
  * reiniciar el servicio sin duplicar datos.
  */
 @Component
-@RequiredArgsConstructor
+@RequiredArgsConstructor // 
 public class GeoSeeder implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(GeoSeeder.class);

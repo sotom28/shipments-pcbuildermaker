@@ -10,11 +10,13 @@ import com.example.shipments.Dto.ShipmentDtos.UpdateStatusRequest;
 import com.example.shipments.Exception.ApiExceptions.ConflictException;
 import com.example.shipments.Exception.ApiExceptions.ForbiddenException;
 import com.example.shipments.Exception.ApiExceptions.NotFoundException;
+import com.example.shipments.Messaging.ShipmentKafkaEvent;
 import com.example.shipments.Model.Address;
 import com.example.shipments.Model.Shipment;
 import com.example.shipments.Model.ShipmentStatus;
 import com.example.shipments.Repository.ShipmentRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,6 +38,8 @@ public class ShipmentService {
     private final AddressService addresses;
     private final GeoService geo;
     private final TariffService tariff;
+    /** Los eventos para Kafka se publican tras el commit (ver ShipmentKafkaPublisher). */
+    private final ApplicationEventPublisher events;
 
     @Transactional(readOnly = true)
     public QuoteResponse quote(QuoteRequest request) {
@@ -77,7 +81,9 @@ public class ShipmentService {
         s.setShippingCost(quote.cost());
         s.setEstimatedDelivery(quote.estimatedDelivery());
         s.addEvent(ShipmentStatus.PENDING, origin.getName(), "Envio creado");
-        return ShipmentResponse.from(shipments.save(s));
+        Shipment saved = shipments.save(s);
+        events.publishEvent(ShipmentKafkaEvent.of(ShipmentKafkaEvent.CREATED, saved, null));
+        return ShipmentResponse.from(saved);
     }
 
     @Transactional(readOnly = true)
@@ -124,10 +130,13 @@ public class ShipmentService {
             throw new ConflictException("Transicion no permitida: " + s.getStatus() + " -> " + next
                     + ". Permitidas: " + s.getStatus().allowedNext());
         }
+        ShipmentStatus previous = s.getStatus();
         s.setStatus(next);
         s.setUpdatedAt(Instant.now());
         s.addEvent(next, location, note);
-        return ShipmentResponse.from(shipments.save(s));
+        Shipment saved = shipments.save(s);
+        events.publishEvent(ShipmentKafkaEvent.of(ShipmentKafkaEvent.STATUS_CHANGED, saved, previous.name()));
+        return ShipmentResponse.from(saved);
     }
 
     private Shipment load(Long id) {
